@@ -5,6 +5,9 @@
 #include <ctype.h>
 #include <sys/stat.h>
 
+//TODO
+#include <stdio.h>
+
 // Parses a buffer for phrases that match a given regex
 int regexHeaders(regex_t *regex, char *words[1024], char buffer[2048], int size) {
     regmatch_t match;
@@ -30,7 +33,9 @@ int regexHeaders(regex_t *regex, char *words[1024], char buffer[2048], int size)
 // Parses a header field for the key and value
 // returns whether the header is valid and the value if desired
 int64_t parseHeaderField(char *header, int *value) {
+
     if (strstr(header, "HTTP/1.1")) {
+        // TODO technically is wrong since header can have HTTP in it
         return -1;
     }
     int index = 0, length = 0;
@@ -44,6 +49,8 @@ int64_t parseHeaderField(char *header, int *value) {
     while (header[index] != ':' && index < length) {
         index += 1;
     }
+    // Null terminate the key
+    header[index] = '\0';
     if (index + 2 >= length) {
         // A valid header needs at least 2 more characters for a space and key value
         return INVALID;
@@ -58,8 +65,8 @@ int64_t parseHeaderField(char *header, int *value) {
         return INVALID;
     }
     int64_t header_type = -1;
-    bool content = !strcmp(header + index, "Content-Length"),
-         id = !strcmp(header + index, "Request-Id");
+    bool content = !strcmp(header, "Content-Length"),
+         id = !strcmp(header, "Request-Id");
     if (content || id) {
         // Either a request-id header or content-length header
         while (!isdigit(header[index]) && index < length) {
@@ -73,9 +80,16 @@ int64_t parseHeaderField(char *header, int *value) {
         int ind = 0;
         // TODO convert str to num in helper
         while (index < length) {
+            if (!isdigit(header[index])) {
+                break;
+            }
             number[ind] = header[index];
             ind += 1;
             index += 1;
+        }
+        if (ind < 1) {
+            // No digit in value section
+            return INVALID;
         }
         uint64_t tens = 1;
         for (int digit = ind - 1; digit > -1; --digit) {
@@ -124,6 +138,7 @@ int parseRequestLine(char **uri, char *request) {
         type[i] = toupper(request[0]);
         request += 1;
     }
+    request += 1;
 
     // URI
     char path[2048] = { 0 };
@@ -137,11 +152,12 @@ int parseRequestLine(char **uri, char *request) {
     }
     // Save a copy of the URI for the caller
     *uri = strdup(path);
+    request += 1;
 
     // Version
     char version[10] = { 0 };
     for (int i = 0; i < 9; ++i) {
-        if (length <= 0) {
+        if (length <= 0 || request[0] == ' ') {
             break;
         }
         version[i] = request[0];
@@ -149,13 +165,18 @@ int parseRequestLine(char **uri, char *request) {
         request += 1;
     }
 
-    int method = -1;
+    if (strcmp(version, "HTTP/1.1")) {
+        printf("%s\n", version);
+        return INVALID;
+    }
+
+    int method = NOT_IMPLEMENTED;
     // Determine which method this request wants
-    if (!strcmp(type, "PUT") || !strcmp(type, "put")) {
+    if (!strcmp(type, "PUT")) {
         method = PUT;
-    } else if (!strcmp(type, "APPEND") || !strcmp(type, "append")) {
+    } else if (!strcmp(type, "APPEND")) {
         method = APPEND;
-    } else if (!strcmp(type, "GET") || !strcmp(type, "get")) {
+    } else if (!strcmp(type, "GET")) {
         method = GET;
     }
     return method;

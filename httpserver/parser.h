@@ -1,5 +1,5 @@
-#ifndef _PARSER_H_
-#define _PARSER_H_
+#ifndef _PARSER_H
+#define _PARSER_H
 
 #include <regex.h>
 #include <fcntl.h>
@@ -8,8 +8,9 @@
 
 #define REQUEST    "[-a-z0-9.: /_]*\r\n"
 #define BLOCK      4096
-#define INVALID    -1337
+#define INVALID    -400
 #define INCOMPLETE -420
+#define NOT_IMPLEMENTED -404
 #define LENGTH     33
 #define ID         44
 enum Requests { PUT, APPEND, GET };
