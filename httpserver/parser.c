@@ -160,7 +160,7 @@ int parseRequestLine(char **uri, char *request) {
         if (length <= 0 || request[0] == ' ') {
             break;
         }
-        version[i] = request[0];
+        version[i] = toupper(request[0]);
         length -= 1;
         request += 1;
     }

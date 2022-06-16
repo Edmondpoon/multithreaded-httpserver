@@ -12,10 +12,11 @@ typedef struct connection {
     int fd;
     int method;
     int read;
+    int headers_index;
     char *uri;
+    char *headers;
     char *tempfile;
-    bool request_line;
-    bool header;
+    bool headers_processed;
     struct pollfd poller;
 } conn;
 

@@ -22,9 +22,11 @@ conn *create_fd(int fd, int id, int length, int method) {
         c->fd = fd;
         c->method = method;
         c->read = 0;
-        c->body = NULL;
-        c->request_line = false;
-        c->header = false;
+        c->tempfile = NULL;
+        // TODO majuc num
+        c->headers = (char *) calloc(2048, sizeof(char));
+        c->headers_processed = false;
+        c->headers_index = 0;
         c->uri = NULL;
         c->poller.fd = fd;
         c->poller.events = POLLIN;
@@ -38,9 +40,10 @@ void free_fd(conn **fd) {
         if ((*fd)->uri) {
             free((*fd)->uri);
         }
-        if ((*fd)->body) {
-            free((*fd)->body);
+        if ((*fd)->tempfile) {
+            free((*fd)->tempfile);
         }
+        //TODO free headers
         close((*fd)->fd);
         free(*fd);
         *fd = NULL;

@@ -1,6 +1,6 @@
 CC = clang
 CFLAGS = -Wall -pedantic -Werror -Wextra
-SRC = httpserver.o parser.o response.o queue.o
+SRC = httpserver.o parser.o response.o queue.o utils.o methods.o
 LFLAGS = -pthread
 
 .PHONY: all debug scan
