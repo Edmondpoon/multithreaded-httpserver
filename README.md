@@ -1,23 +1,10 @@
-Edmond Poon \
-ejpoon \
-Spring 2022 CSE130 asgn3
-
-# Programming Assignment 3
-This assignment aims to implement a server that accepts get, append, and put requests while logging all completed responses to a specified logfile and allowing for multiple clients at a time (multi-threaded).
+# Multi-Threaded Httpserver
 
 ## Building 
 
 The server can be built at once via either of the commands below:
 ```
-$ make all
-```
-Or 
-```
 $ make 
-```
-Or 
-```
-$ make httpserver
 ```
 
 ## Running
@@ -31,12 +18,6 @@ $ ./httpserver [-t threads] [-l logfile] <port>
 |File         |Description                                                                       | 
 |:-----------:| -------------------------------------------------------------------------------- |
 |httpserver.c |A source file that contains the main logic that comprises the server.             |
-|node.c     |A source file that contains the functions that represent a hash table entry.             |
-|node.h   |A header file that contains the declarations that are used to represent a hash table entry.             |
-|bst.c     |A source file that contains the functions that implement the bst.             |
-|bst.h   |A header file that contains the declarations that are used implement a bst.             |
-|ht.c     |A source file that contains the functions that implement a hash table.             |
-|ht.h   |A header file that contains the declarations that are used to implement a hash table.             |
 |parser.c     |A source file that contains the functions that parse the request.             |
 |parser.h   |A header file that contains the declarations that are used to parse the request.             |
 |queue.c     |A source file that contains the functions that implement a bounded buffer.             |
