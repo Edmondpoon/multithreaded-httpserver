@@ -2,6 +2,7 @@
 #include "response.h"
 #include "utils.h"
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <unistd.h>
@@ -73,14 +74,14 @@ int Put(conn *c, int connfd, int nonBodyLength) {
         tempfd = open(c->tempfile, O_RDWR | O_APPEND);
     }
 
-    int red = 0;
     char buffer[BLOCK] = { 0 };
+    int red = c->headers_index;
     if (red - nonBodyLength > -1 && red - nonBodyLength <= c->content_length) {
-        write(tempfd, buffer + nonBodyLength, red - nonBodyLength);
+        write(tempfd, c->headers + nonBodyLength, red - nonBodyLength);
         c->content_length -= red - nonBodyLength;
         c->read += red - nonBodyLength;
     } else if (red - nonBodyLength > c->content_length) {
-        write(tempfd, buffer + nonBodyLength, c->content_length);
+        write(tempfd, c->headers + nonBodyLength, c->content_length);
         c->read += c->content_length;
         c->content_length = 0;
     }
@@ -111,7 +112,7 @@ int Put(conn *c, int connfd, int nonBodyLength) {
 
     // TODO non blocking
     flock(fd, LOCK_EX);
-    rename(c->tempfile, c->uri);
+    rename(c->tempfile, c->uri + 1);
     flock(fd, LOCK_UN);
     close(tempfd);
 

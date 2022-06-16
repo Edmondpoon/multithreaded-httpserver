@@ -189,7 +189,7 @@ static void handle_connection(conn *c, regex_t reg) {
         // parse headers
         // Start at after the first pair of \r\n of the request line
         // Helps keep track of whether the buffer includes some body text
-        for (int match = 0; match < matches; ++match) {
+        for (int match = 1; match < matches; ++match) {
             int value = 0;
             int l = strlen(parsed[match]);
             nonBodyLength += l;
