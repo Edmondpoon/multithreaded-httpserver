@@ -1,37 +1,36 @@
-// TODO use epoll
-#include "queue.h"
+#include "client.h"
 #include "methods.h"
-#include "utils.h"
 #include "parser.h"
+#include "queue.h"
 #include "response.h"
-#include <assert.h>
+#include "utils.h"
 #include <arpa/inet.h>
+#include <assert.h>
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
-#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/file.h>
 #include <sys/time.h>
 
 #define OPTIONS              "t:l:"
-#define DEFAULT_ID 0
 #define BUF_SIZE             4096
+#define MAX_EVENTS           4096
 #define REQUEST_MAX          2048
 #define DEFAULT_THREAD_COUNT 4
 static FILE *logfile;
 #define LOG(...) fprintf(logfile, __VA_ARGS__);
 
-pthread_mutex_t locks[4] = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
-pthread_cond_t conds[4] = { PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER };
+pthread_mutex_t locks[4] = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER };
+pthread_cond_t conds[4] = { PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER,
+    PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER };
 enum Lock { LOG, WAIT, FULL, POLL };
 enum Cond { WAITING, FILLED, READY };
 
@@ -40,13 +39,10 @@ enum Cond { WAITING, FILLED, READY };
 int working = 0, created = 0;
 Queue *queue = NULL;
 Queue *polled = NULL;
-
-Queue *paused = NULL;
-Queue *writers = NULL;
-Queue *readers = NULL;
+pthread_t *workers = NULL;
 
 // Logs a request
-void logRequest(int request, char *path, int status, int id) {
+void log_request(int request, char *path, int status, int id) {
     char req[10] = { 0 };
     switch (request) {
     case 0: memcpy(req, "PUT", 3); break;
@@ -62,7 +58,7 @@ void logRequest(int request, char *path, int status, int id) {
 }
 
 // Free regex
-void freeRegex(char *words[1024], int size) {
+void free_regex(char *words[1024], int size) {
     for (int word = 0; word < size; ++word) {
         if (words[word]) {
             free(words[word]);
@@ -104,88 +100,47 @@ static int create_listen_socket(uint16_t port) {
     return listenfd;
 }
 
-static void handle_connection(conn *c, regex_t reg) {
+static void handle_connection(Client *connection, regex_t reg) {
     // TODO the implementation of just pushing back to queue is broken rn cause queue may be full
     char *parsed[1024];
-    int fd = -1;
     int nonBodyLength = 0, red = 0;
-    int connfd = c->fd, matches = 0;
-    if (!c->headers_processed) {
-        red = read(connfd, c->headers + c->headers_index, REQUEST_MAX - c->headers_index);
-        c->headers_index += red;
+    int connfd = connection->fd, matches = 0;
+    if (!connection->headers_processed) {
+        red = read(connfd, connection->headers + connection->headers_index,
+            REQUEST_MAX - connection->headers_index);
+        connection->headers_index += red;
     }
 
     // Checks to see if we have encountered every header in the request
-    if (!strstr(c->headers, "\r\n\r\n")) {
-        if (poll(&c->poller, 1, 1500) == 0) {
-            pthread_mutex_lock(&poll_lock);
-            push(polled, c);
-            pthread_mutex_unlock(&poll_lock);
+    if (!strstr(connection->headers, "\r\n\r\n")) {
+        if (poll_client(connection, polled)) {
             return;
         }
-        while ((red = read(connfd, c->headers + c->headers_index, REQUEST_MAX - c->headers_index)) > 0) {
-            c->headers_index += red;
+        while ((red = read(connfd, connection->headers + connection->headers_index,
+                    REQUEST_MAX - connection->headers_index))
+               > 0) {
+            connection->headers_index += red;
             // Start looking for the delimiter
-            if (!strcmp(c->headers, "\r\n\r\n")) {
+            if (!strcmp(connection->headers, "\r\n\r\n")) {
                 break;
             }
-            if (poll(&c->poller, 1, 1500) == 0) {
-                pthread_mutex_lock(&poll_lock);
-                push(polled, c);
-                pthread_mutex_unlock(&poll_lock);
+            if (poll_client(connection, polled)) {
                 return;
             }
         }
     }
 
-
-    /*
-    if (!c->headers_processed) {
-        bool body = false;
-        int temp = red;
-        if (poll(&c->poller, 1, 1500) == 0) {
-            pthread_mutex_lock(&poll_lock);
-            push(polled, c);
-            pthread_mutex_unlock(&poll_lock);
-            return;
-        }
-        //printf(" not polled\n");
-        int extras = 0;
-        while ((red = read(connfd, c->headers + extras, REQUEST_MAX - temp)) > 0) {
-            //printf("reading\n");
-            temp += red;
-            extras += red;
-            if (strstr(c->headers, "\r\n\r\n")) {
-                body = true;
-                break;
-            }
-            if (poll(&c->poller, 1, 1500) == 0) {
-                pthread_mutex_lock(&poll_lock);
-                push(polled, c);
-                pthread_mutex_unlock(&poll_lock);
-                return;
-            }
-        }
-        if (!body) {
-            fprintf(stderr, "invalid request (no body)\n");
-            regfree(&reg);
-            return;
-        }
-        buffer[extras] = '\0';
-    }
-    */
-
-    int id = c->id;
-    if (!c->headers_processed) {
-        matches = regexHeaders(&reg, parsed, c->headers, strlen(c->headers));
+    int id = connection->id;
+    if (!connection->headers_processed) {
+        matches = regex_headers(&reg, parsed, connection->headers, strlen(connection->headers));
         if (matches < 1) {
             fprintf(stderr, "no valid regex match\n");
-            freeRegex(parsed, matches);
+            free_regex(parsed, matches);
             return;
         }
         // Helps keep track of whether the buffer includes some body text
         nonBodyLength += strlen(parsed[0]);
-        c->method = parseRequestLine(&(c->uri), parsed[0]);
+        set_method(connection, parse_requestLine(&(connection->uri), parsed[0]));
         // parse headers
         // Start at after the first pair of \r\n of the request line
         // Helps keep track of whether the buffer includes some body text
@@ -195,73 +150,62 @@ static void handle_connection(conn *c, regex_t reg) {
             nonBodyLength += l;
             if (l == 2 && parsed[match][0] == '\r' && parsed[match][1] == '\n') {
                 // Found the empty header
-                c->headers_processed = true;
+                connection->headers_processed = true;
                 break;
             }
-            int64_t temp = parseHeaderField(parsed[match], &value);
+            int64_t temp = parse_headerField(parsed[match], &value);
             if (temp == INVALID) {
                 break;
-            } else if (c->content_length == 0 && temp == LENGTH) {
-                c->content_length = value;
-                //printf("getting length %d\n", c->content_length);
+            } else if (connection->content_length == UNDEFINED && temp == LENGTH) {
+                set_length(connection, value);
             } else if (temp == ID) {
                 id = value;
-                c->id = value;
+                set_id(connection, value);
             }
         }
-        freeRegex(parsed, matches);
+        free_regex(parsed, matches);
     }
 
     // Path index finds the path given a non-formal path
-    if (strlen(c->uri) < 2) {
+    if (strlen(connection->uri) < 2) {
         // invalid path judged by length
-        logRequest(c->method, c->uri, 404, c->id);
-        free_fd(&c);
+        log_request(connection->method, connection->uri, 404, connection->id);
+        close_client(&connection);
         notFoundResponse(connfd);
         return;
-    } else if (!c->tempfile && !parseUri(c->uri, c->method)) {
+    } else if (!strcmp(connection->tempfile, "XXXXXX")
+               && !parse_uri(connection->uri, connection->method)) {
         // parse URI to deal with directories
-        logRequest(c->method, c->uri, 500, c->id);
-        free_fd(&c);
+        log_request(connection->method, connection->uri, 500, connection->id);
+        close_client(&connection);
         internalErrorResponse(connfd);
         return;
     }
 
     struct stat sb;
-    int exists = stat(c->uri + 1, &sb);
-    if (exists < 0 && c->method != PUT) {
+    int exists = stat(connection->uri + 1, &sb);
+    if (exists < 0 && connection->method != PUT) {
         // Put requests are the only ones that don't require the file to exist beforehand
-        logRequest(c->method, c->uri, 404, id);
+        log_request(connection->method, connection->uri, 404, id);
         notFoundResponse(connfd);
-    } else if (c->method == GET) {
-        int success = Get(c, connfd);
+    } else if (connection->method == GET) {
+        int success = Get(connection, connfd);
         if (success == OK) {
-            logRequest(c->method, c->uri, 200, id);
+            log_request(connection->method, connection->uri, 200, id);
         }
-    } else if (c->method == PUT) {
-        int success = Put(c, connfd, nonBodyLength);
+    } else if (connection->method == PUT) {
+        int success = Put(connection, nonBodyLength, polled);
         switch (success) {
-            case CREATED:
-                logRequest(c->method, c->uri, 201, id);
-                createdResponse(connfd);
-                break;
-            case OK:
-                logRequest(c->method, c->uri, 200, id);
-                okResponse(connfd);
-                break;
-            case POLL:
-                // Don't close the connection for polled requests
-                return;
-            case ERROR:
-                return;
-            default:
-                return;
+        case CREATED: log_request(connection->method, connection->uri, 201, id); break;
+        case OK: log_request(connection->method, connection->uri, 200, id); break;
+        case POLL:
+            // Don't close the connection for polled requests
+            return;
+        case ERROR: return;
+        default: return;
         }
     }
-    free_fd(&c);
-    if (fd > -1) {
-        close(fd);
-    }
+    close_client(&connection);
     return;
 }
 
@@ -269,12 +213,7 @@ static void handle_connection(conn *c, regex_t reg) {
 void *thread_handler() {
     struct timeval now = { 0, 0 };
     struct timespec ts = { 0, 0 };
-    int a = 0;
-    if ((a = pthread_mutex_lock(&(locks[WAIT]))) != 0) {
-        printf("what%d\n", a);
-        fprintf(stderr, "Failed to lock mutex.\n");
-        return NULL;
-    }
+    assert(pthread_mutex_lock(&(locks[WAIT])) == 0);
     regex_t reg;
     if (regcomp(&reg, REQUEST, REG_EXTENDED | REG_ICASE)) {
         fprintf(stderr, "Unable to initialize regular expression.\n");
@@ -285,12 +224,13 @@ void *thread_handler() {
             // Sleeps until the main thread signals this thread that an incoming request needs parsing
             gettimeofday(&now, NULL);
             ts.tv_sec = now.tv_sec + 5;
-            if (pthread_cond_timedwait(&(conds[WAITING]), &(locks[WAIT]), &ts) == ETIMEDOUT && !empty(polled)) {
+            if (pthread_cond_timedwait(&(conds[WAITING]), &(locks[WAIT]), &ts) == ETIMEDOUT
+                && !empty(polled)) {
                 pthread_mutex_lock(&poll_lock);
                 //if (!empty(polled)) {
                 for (int i = 0; i < length(polled); ++i) {
                     // TODO assumes doesnt get full
-                    conn *temp = pop(polled);
+                    Client *temp = pop(polled);
                     if (poll(&temp->poller, 1, 1500) > 0) {
                         push(queue, temp);
                     } else {
@@ -303,56 +243,42 @@ void *thread_handler() {
         if (get_cleanup(queue)) {
             break;
         }
-        conn *client = pop(queue);
+        Client *client = pop(queue);
         pthread_cond_signal(&(conds[FILLED]));
         working += 1;
-        if (pthread_mutex_unlock(&(locks[WAIT])) != 0) {
-            fprintf(stderr, "Failed to unlock mutex.\n");
-            return NULL;
-        }
+        assert(pthread_mutex_unlock(&(locks[WAIT])) == 0);
 
         handle_connection(client, reg);
-        if (pthread_mutex_lock(&(locks[WAIT])) != 0) {
-            fprintf(stderr, "Failed to lock mutex.\n");
-            return NULL;
-        }
+        assert(pthread_mutex_lock(&(locks[WAIT])) == 0);
         working -= 1;
     }
     created -= 1;
     pthread_cond_signal(&(conds[READY]));
-    if (pthread_mutex_unlock(&(locks[WAIT])) != 0) {
-        fprintf(stderr, "Failed to unlock mutex.\n");
-        return NULL;
-    }
+    assert(pthread_mutex_unlock(&(locks[WAIT])) == 0);
     regfree(&reg);
     return NULL;
 }
 
 static void sigterm_handler(int sig) {
     if (sig == SIGTERM || sig == SIGINT) {
-        if (pthread_mutex_lock(&(locks[WAIT])) != 0) {
-            warn("Failed to lock mutex.\n");
-        }
+        assert(pthread_mutex_lock(&(locks[WAIT])) == 0);
         cleanup_init(queue);
-        int stopping = created;
-        if (pthread_mutex_unlock(&(locks[WAIT])) != 0) {
-            warn("Failed to unlock mutex.\n");
-        }
+        int stopping = created, total_threads = created;
+        assert(pthread_mutex_unlock(&(locks[WAIT])) == 0);
         while (stopping > 0) {
             // signals to every thread that we no longer need them
             // has the threads end their loops
-            if (pthread_mutex_lock(&(locks[WAIT])) != 0) {
-                warn("Failed to lock mutex.\n");
-            }
+            assert(pthread_mutex_lock(&(locks[WAIT])) == 0);
             int current = created;
             pthread_cond_signal(&(conds[WAITING]));
             while (created == current) {
                 pthread_cond_wait(&(conds[READY]), &(locks[WAIT]));
             }
             stopping -= 1;
-            if (pthread_mutex_unlock(&(locks[WAIT])) != 0) {
-                warn("Failed to unlock mutex.\n");
-            }
+            assert(pthread_mutex_unlock(&(locks[WAIT])) == 0);
+        }
+        for (int thread = 0; thread < total_threads; ++thread) {
+            pthread_join(workers[thread], NULL);
         }
         if (queue) {
             free_queue(&queue);
@@ -364,11 +290,6 @@ static void sigterm_handler(int sig) {
             pthread_mutex_destroy(&(locks[l]));
             pthread_cond_destroy(&(conds[l]));
         }
-        /*
-        pthread_mutex_destroy(&wait_lock);
-        pthread_cond_destroy(&ready);
-        pthread_cond_destroy(&filled);
-        */
         warnx("received SIGTERM");
         fclose(logfile);
         exit(EXIT_SUCCESS);
@@ -418,7 +339,8 @@ int main(int argc, char *argv[]) {
     polled = create_queue(BUF_SIZE); // Stores polled requests
     assert(polled);
 
-    pthread_t workers[threads];
+    workers = (pthread_t *) calloc(threads, sizeof(pthread_t));
+    assert(workers);
 
     created = threads;
     for (int i = 0; i < threads; i++) {
@@ -441,14 +363,9 @@ int main(int argc, char *argv[]) {
             // Full bounded queue so the current client has to be put on hold
             pthread_cond_wait(&(conds[FILLED]), &(locks[WAIT]));
         }
-        conn *c = create_fd(connfd, DEFAULT_ID, 0, -1);
-        if (poll(&c->poller, 1, 1500) == 0) {
-            if (full(polled)) {
-                printf("full\n");
-            }
-            pthread_mutex_lock(&poll_lock);
+        Client *c = create_client(connfd);
+        if (poll_client(c, polled)) {
             push(polled, c);
-            pthread_mutex_unlock(&poll_lock);
         } else {
             push(queue, c);
         }

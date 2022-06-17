@@ -9,7 +9,7 @@
 #include <stdio.h>
 
 // Parses a buffer for phrases that match a given regex
-int regexHeaders(regex_t *regex, char *words[1024], char buffer[2048], int size) {
+int regex_headers(regex_t *regex, char *words[1024], char buffer[2048], int size) {
     regmatch_t match;
     int matches = 0;
     char *temp = buffer;
@@ -32,7 +32,7 @@ int regexHeaders(regex_t *regex, char *words[1024], char buffer[2048], int size)
 
 // Parses a header field for the key and value
 // returns whether the header is valid and the value if desired
-int64_t parseHeaderField(char *header, int *value) {
+int64_t parse_headerField(char *header, int *value) {
 
     if (strstr(header, "HTTP/1.1")) {
         // TODO technically is wrong since header can have HTTP in it
@@ -65,8 +65,7 @@ int64_t parseHeaderField(char *header, int *value) {
         return INVALID;
     }
     int64_t header_type = -1;
-    bool content = !strcmp(header, "Content-Length"),
-         id = !strcmp(header, "Request-Id");
+    bool content = !strcmp(header, "Content-Length"), id = !strcmp(header, "Request-Id");
     if (content || id) {
         // Either a request-id header or content-length header
         while (!isdigit(header[index]) && index < length) {
@@ -119,7 +118,7 @@ int64_t parseHeaderField(char *header, int *value) {
 
 // Parses the request line for the method, uri, version
 // returns whether the request line was valid or not
-int parseRequestLine(char **uri, char *request) {
+int parse_requestLine(char **uri, char *request) {
     int length = 0;
     char type[9] = { 0 };
     // Calculates the length of the header excluding \r\n
@@ -184,7 +183,7 @@ int parseRequestLine(char **uri, char *request) {
 
 // Parses a uri to create directories and to ensure the path is valid
 // returns whether the path was valid or not
-bool parseUri(char *path, int request) {
+bool parse_uri(char *path, int request) {
     struct stat sb;
     char path_name[2048] = { 0 };
     // Ensures the path is valid

@@ -1,55 +1,15 @@
 #include "queue.h"
 #include <stdlib.h>
-#include <stdbool.h>
-#include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 struct Queue {
     int front;
     int tail;
     int length;
     int cap;
-    conn **queue;
+    Client **queue;
     bool cleanup;
 };
-
-conn *create_fd(int fd, int id, int length, int method) {
-    conn *c = (conn *) calloc(1, sizeof(conn));
-    if (c) {
-        c->id = id;
-        c->content_length = length;
-        c->fd = fd;
-        c->method = method;
-        c->read = 0;
-        c->tempfile = NULL;
-        // TODO majuc num
-        c->headers = (char *) calloc(2048, sizeof(char));
-        c->headers_processed = false;
-        c->headers_index = 0;
-        c->uri = NULL;
-        c->poller.fd = fd;
-        c->poller.events = POLLIN;
-        c->poller.revents = POLLIN;
-    }
-    return c;
-}
-
-void free_fd(conn **fd) {
-    if (*fd) {
-        if ((*fd)->uri) {
-            free((*fd)->uri);
-        }
-        if ((*fd)->tempfile) {
-            free((*fd)->tempfile);
-        }
-        //TODO free headers
-        close((*fd)->fd);
-        free(*fd);
-        *fd = NULL;
-    }
-    return;
-}
 
 Queue *create_queue(int capacity) {
     Queue *q = (Queue *) calloc(1, sizeof(Queue));
@@ -59,7 +19,7 @@ Queue *create_queue(int capacity) {
         q->length = 0;
         q->cap = capacity;
         q->cleanup = false;
-        q->queue = (conn **) calloc(capacity, sizeof(conn *));
+        q->queue = (Client **) calloc(capacity, sizeof(Client *));
         //q->queue = (int *) calloc(capacity, sizeof(int));
         // TODO check
     }
@@ -69,8 +29,8 @@ Queue *create_queue(int capacity) {
 void free_queue(Queue **q) {
     if (*q) {
         while (!empty(*q)) {
-            conn *temp = pop(*q);
-            free_fd(&temp);
+            Client *temp = pop(*q);
+            close_client(&temp);
         }
         free((*q)->queue);
         free(*q);
@@ -100,7 +60,7 @@ int length(Queue *q) {
     return q->length;
 }
 
-void push(Queue *q, conn *connfd) {
+void push(Queue *q, Client *connfd) {
     if (!full(q)) {
         q->queue[q->tail] = connfd;
         q->tail = (q->tail + 1) % q->cap;
@@ -109,11 +69,11 @@ void push(Queue *q, conn *connfd) {
     return;
 }
 
-conn *pop(Queue *q) {
+Client *pop(Queue *q) {
     if (empty(q)) {
         return NULL;
     }
-    conn *fd = q->queue[q->front];
+    Client *fd = q->queue[q->front];
     q->front = (q->front + 1) % q->cap;
     q->length -= 1;
     return fd;

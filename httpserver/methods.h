@@ -5,12 +5,12 @@
 #include <pthread.h>
 
 extern pthread_mutex_t poll_lock;
-extern Queue *polled;
 enum Status_codes { ERROR, CREATED, OK, NOT_FOUND, POLLED };
 
-int Get(conn *c, int connfd);
+// TODO dont need confd
+int Get(Client *c, int connfd);
 
-int Put(conn *c, int connfd, int nonBodyLength);
+int Put(Client *c, int nonBodyLength, Queue *polled);
 
 int Delete();
 
@@ -19,4 +19,3 @@ int Head();
 int Post();
 
 #endif
-

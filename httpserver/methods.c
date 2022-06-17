@@ -1,11 +1,10 @@
 #include "methods.h"
 #include "response.h"
 #include "utils.h"
+#include <err.h>
 #include <sys/stat.h>
 #include <sys/file.h>
 #include <fcntl.h>
-#include <inttypes.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -13,23 +12,20 @@
 #define BLOCK 4096
 pthread_mutex_t poll_lock = PTHREAD_MUTEX_INITIALIZER;
 
-int Get(conn *c, int connfd) {
+int Get(Client *connection, int connfd) {
     struct stat sb;
-    int exists = stat(c->uri + 1, &sb), directory = S_ISDIR(sb.st_mode);
+    int exists = stat(connection->uri + 1, &sb), directory = S_ISDIR(sb.st_mode);
     if (exists > -1 && !directory) {
-        int fd = open(c->uri + 1, O_RDONLY);
-        // non blocking TODO
-        flock(fd, LOCK_SH);
+        int fd = open(connection->uri + 1, O_RDONLY);
         if (fd < 0) {
-            // broke TODO no file kek
-            printf("no file d\n");
             return NOT_FOUND;
         }
-
+        // non blocking TODO
+        flock(fd, LOCK_SH);
         // Get the number of bytes in the file
-        stat(c->uri + 1, &sb);
+        stat(connection->uri + 1, &sb);
         uint64_t total_read = sb.st_size;
-        char *header = concatuint64tostr(total_read, "HTTP/1.1 200 OK\r\nContent-Length: ");
+        char *header = concat_str(total_read, "HTTP/1.1 200 OK\r\nContent-Length: ");
         int header_size = strlen(header);
         int red = read(fd, header + strlen(header), BLOCK - header_size - 1);
         header_size += red;
@@ -40,89 +36,76 @@ int Get(conn *c, int connfd) {
             red = read(fd, buffer, BLOCK - 1);
             total_read -= red;
             // TODO
-            int f = 0;
+            int index = 0;
             while (red > 0) {
-                int written = write(connfd, buffer + f, red);
-                f += written;
+                int written = write(connfd, buffer + index, red);
+                index += written;
                 red -= written;
             }
         }
         flock(fd, LOCK_UN);
         free(header);
-        // TODO log requests in main file
-        //logRequest(c->method, c->uri, 200, id);
+        close(fd);
         return OK;
     }
     return ERROR;
 }
 
-int Put(conn *c, int connfd, int nonBodyLength) {
+int Put(Client *connection, int nonBodyLength, Queue *polled) {
     bool create = false;
     // determines whether the file was created or already existed
-    int fd = open(c->uri + 1, O_WRONLY);
+    int fd = open(connection->uri + 1, O_WRONLY);
     if (fd < 0) {
-        fd = open(c->uri + 1, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
+        fd = open(connection->uri + 1, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
         create = true;
     }
     int tempfd = -1;
-    if (!c->tempfile) {
-        char name[7] = "XXXXXX";
-        tempfd = mkstemp(name);
-        // TODO free this
-        c->tempfile = strdup(name);
+    if (!strcmp(connection->tempfile, "XXXXXX")) {
+        tempfd = mkstemp(connection->tempfile);
     } else {
-        tempfd = open(c->tempfile, O_RDWR | O_APPEND);
+        tempfd = open(connection->tempfile, O_RDWR | O_APPEND);
+    }
+    if (tempfd < 0) {
+        printf("broke\n");
+        // TODO
+        return ERROR;
     }
 
-    char buffer[BLOCK] = { 0 };
-    int red = c->headers_index;
-    if (red - nonBodyLength > -1 && red - nonBodyLength <= c->content_length) {
-        write(tempfd, c->headers + nonBodyLength, red - nonBodyLength);
-        c->content_length -= red - nonBodyLength;
-        c->read += red - nonBodyLength;
-    } else if (red - nonBodyLength > c->content_length) {
-        write(tempfd, c->headers + nonBodyLength, c->content_length);
-        c->read += c->content_length;
-        c->content_length = 0;
+    char buffer[BLOCK + 1] = { 0 };
+    int red = connection->headers_index;
+    if (red - nonBodyLength > -1 && red - nonBodyLength <= connection->content_length) {
+        write(tempfd, connection->headers + nonBodyLength, red - nonBodyLength);
+        connection->content_length -= red - nonBodyLength;
+    } else if (red - nonBodyLength > connection->content_length) {
+        write(tempfd, connection->headers + nonBodyLength, connection->content_length);
+        connection->content_length = 0;
     }
-    if (c->content_length > 0 && poll(&c->poller, 1, 1500) == 0) {
-        pthread_mutex_lock(&poll_lock);
-        push(polled, c);
-        pthread_mutex_unlock(&poll_lock);
-        close(fd);
-        close(tempfd);
+    if (connection->content_length > 0 && poll_client(connection, polled)) {
         return POLLED;
     }
-    while (c->content_length > 0) {
-        red = read(connfd, buffer, (c->content_length > BLOCK ? BLOCK : c->content_length));
+    while (connection->content_length > 0) {
+        red = read(connection->fd, buffer,
+            (connection->content_length > BLOCK ? BLOCK : connection->content_length));
         write(tempfd, buffer, red);
-        c->read += red;
-        c->content_length -= red;
-        if (c->content_length > 0 && poll(&c->poller, 1, 1500) == 0) {
-            // TODO also helper func pls
-
-            pthread_mutex_lock(&poll_lock);
-            push(polled, c);
-            pthread_mutex_unlock(&poll_lock);
-            close(tempfd);
-            close(fd);
+        connection->content_length -= red;
+        if (connection->content_length > 0 && poll_client(connection, polled)) {
             return POLLED;
         }
     }
 
     // TODO non blocking
     flock(fd, LOCK_EX);
-    rename(c->tempfile, c->uri + 1);
+    rename(connection->tempfile, connection->uri + 1);
     flock(fd, LOCK_UN);
     close(tempfd);
+    close(fd);
 
-    //  TODO log in main file
     int status = ERROR;
     if (create) {
-        createdResponse(connfd);
+        createdResponse(connection->fd);
         status = CREATED;
     } else {
-        okResponse(connfd);
+        okResponse(connection->fd);
         status = OK;
     }
     return status;
@@ -133,4 +116,3 @@ int Delete();
 int Head();
 
 int Post();
-

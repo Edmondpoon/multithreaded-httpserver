@@ -1,28 +1,9 @@
 #ifndef _QUEUE_H_
 #define _QUEUE_H_
 
-#include <stdbool.h>
-#include <poll.h>
+#include "client.h"
 
 typedef struct Queue Queue;
-
-typedef struct connection {
-    int id;
-    int content_length;
-    int fd;
-    int method;
-    int read;
-    int headers_index;
-    char *uri;
-    char *headers;
-    char *tempfile;
-    bool headers_processed;
-    struct pollfd poller;
-} conn;
-
-conn *create_fd(int fd, int id, int length, int method);
-
-void free_fd(conn **fd);
 
 Queue *create_queue(int capacity);
 
@@ -39,10 +20,10 @@ bool full(Queue *q);
 int length(Queue *q);
 
 //void push(Queue *q, int connfd, int id, int length, int method, char *uri);
-void push(Queue *q, conn *connfd);
+void push(Queue *q, Client *connfd);
 //void push(Queue *q, int connfd);
 
-conn *pop(Queue *q);
+Client *pop(Queue *q);
 //int pop(Queue *q);
 
 #endif
