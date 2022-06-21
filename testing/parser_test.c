@@ -1,3 +1,9 @@
+//
+// Tests for a parser
+// Any valgrind errors/leaks indicates an issue with the implementation and should be addressed
+//
+//
+
 #include "../httpserver/parser.h"
 #include <inttypes.h>
 #include <unistd.h>
@@ -12,6 +18,7 @@
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
 #define OPTIONS "hrua"
+enum Functions { HEADERS, REQUESTS, URI };
 
 char *uri_grabber(char *request);
 
@@ -49,7 +56,7 @@ void headers(void) {
     // Valid tests
     for (int test = 0; test < vTests; test++) {
         int output = -1, value = 0;
-        output = parseHeaderField(valid_arg[test], &value);
+        output = parse_headerField(valid_arg[test], &value);
         if (output == -1) {
             printf("Test: %s\t" ANSI_COLOR_GREEN "PASSED" ANSI_COLOR_RESET "\n", valid_tests[test]); 
         } else if ((output == ID || output == LENGTH)) {
@@ -66,7 +73,7 @@ void headers(void) {
     // Invalid tests
     for (int test = 0; test < iTests; test++) {
         int output = -1, value = 0;
-        output = parseHeaderField(invalid_arg[test], &value);
+        output = parse_headerField(invalid_arg[test], &value);
         if (output == INVALID) {
             printf("Test: %s\t" ANSI_COLOR_GREEN "PASSED" ANSI_COLOR_RESET "\n", invalid_tests[test]); 
         } else {
@@ -131,7 +138,7 @@ void requests(void) {
     for (int test = 0; test < vTests; test++) {
         int output = -1;
         char *uri = NULL;
-        output = parseRequestLine(&uri, valid_arg[test]);
+        output = parse_requestLine(&uri, valid_arg[test]);
         if (output == INVALID || output == NOT_IMPLEMENTED) {
             printf("Test: %s\t" ANSI_COLOR_RED "FAILED!" ANSI_COLOR_RESET "\n", valid_tests[test]); 
         } else {
@@ -149,7 +156,7 @@ void requests(void) {
     for (int test = 0; test < iTests; test++) {
         int output = -1;
         char *uri = NULL;
-        output = parseRequestLine(&uri, invalid_arg[test]);
+        output = parse_requestLine(&uri, invalid_arg[test]);
         if (output == INVALID || output == NOT_IMPLEMENTED) {
             printf("Test: %s\t" ANSI_COLOR_GREEN "PASSED!" ANSI_COLOR_RESET "\n", invalid_tests[test]); 
         } else {
@@ -160,34 +167,33 @@ void requests(void) {
 }
 
 void uri(void) {
+    return;
 }
 
 int main(int argc, char *argv[]) {
     int opt = 0;
-    
+    void (*tests[3])(void) = { headers, requests, uri }; 
     // Flags for the corresponding tests
     while ((opt = getopt(argc, argv, OPTIONS)) != -1) {
         switch (opt) {
             case 'a':
-                // Test header parser
-                headers();
-                printf("---------------------------\n");
-                requests();
-                printf("---------------------------\n");
-                uri();
-                printf("---------------------------\n");
+                // Tests all tests
+                for (int test = 0; test < 3; ++test) {
+                    tests[test]();
+                    printf("---------------------------\n");
+                }
                 break;
             case 'h':
                 // Test header parser
-                headers();
+                tests[HEADERS]();
                 break;
             case 'r':
                 // Test Request line parser
-                requests();
+                tests[REQUESTS]();
                 break;
             case 'u':
                 // Test URI parser
-                uri();
+                tests[URI]();
                 break;
             default:;
         }

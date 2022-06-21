@@ -1,23 +1,28 @@
 CC = clang
 CFLAGS = -Wall -pedantic -Werror -Wextra
-PRS_SRC = ../httpserver/parser.c parser_test.c
-LFLAGS = -pthread
+
+HTTP = ../httpserver/
+PRS_SRC = $(HTTP)parser.c parser_test.c
+LIST_SRC = $(HTTP)ll.c $(HTTP)client.c list_test.c
 
 .PHONY: all debug scan
 
-all: Parser
+all: Parser List
 
 Parser: $(PRS_SRC) 
-	$(CC) $(LFLAGS) -o $@ $(PRS_SRC)
+	$(CC) -o $@ $(PRS_SRC)
+
+List: $(LIST_SRC) 
+	$(CC) -o $@ $(LIST_SRC)
 
 %.o: %.c
-	$(CC) $(LFLAGS) $(CFLAGS) -c $<
+	$(CC) $(CFLAGS) -c $<
 
 format:
 	clang-format -i -style=file *.[ch]
 
 clean:
-	rm -f *.o Parser
+	rm -f *.o Parser List
 
 scan: clean
 	scan-build --use-cc=$(CC) make
