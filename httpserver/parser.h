@@ -8,11 +8,12 @@
 
 #define REQUEST         "[-a-z0-9.: /_]*\r\n"
 #define BLOCK           4096
+#define REQUEST_MAX     2048
 #define INVALID         -400
-#define INCOMPLETE      -420
 #define NOT_IMPLEMENTED -404
 #define LENGTH          33
 #define ID              44
+
 enum Requests { PUT, APPEND, GET };
 
 int regex_headers(regex_t *regex, char *words[1024], char buffer[2048], int size);

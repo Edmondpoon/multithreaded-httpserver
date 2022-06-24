@@ -20,16 +20,14 @@ Queue *create_queue(int capacity) {
         q->cap = capacity;
         q->cleanup = false;
         q->queue = (Client **) calloc(capacity, sizeof(Client *));
-        //q->queue = (int *) calloc(capacity, sizeof(int));
-        // TODO check
     }
     return q;
 }
 
 void free_queue(Queue **q) {
     if (*q) {
-        while (!empty(*q)) {
-            Client *temp = pop(*q);
+        while (!queue_empty(*q)) {
+            Client *temp = queue_pop(*q);
             close_client(&temp);
         }
         free((*q)->queue);
@@ -48,20 +46,20 @@ bool get_cleanup(Queue *q) {
     return q->cleanup;
 }
 
-bool empty(Queue *q) {
+bool queue_empty(Queue *q) {
     return q->length == 0;
 }
 
-bool full(Queue *q) {
+bool queue_full(Queue *q) {
     return q->length == q->cap;
 }
 
-int length(Queue *q) {
+int queue_length(Queue *q) {
     return q->length;
 }
 
-void push(Queue *q, Client *connfd) {
-    if (!full(q)) {
+void queue_push(Queue *q, Client *connfd) {
+    if (!queue_full(q)) {
         q->queue[q->tail] = connfd;
         q->tail = (q->tail + 1) % q->cap;
         q->length += 1;
@@ -69,8 +67,8 @@ void push(Queue *q, Client *connfd) {
     return;
 }
 
-Client *pop(Queue *q) {
-    if (empty(q)) {
+Client *queue_pop(Queue *q) {
+    if (queue_empty(q)) {
         return NULL;
     }
     Client *fd = q->queue[q->front];

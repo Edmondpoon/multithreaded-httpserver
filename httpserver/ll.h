@@ -20,11 +20,10 @@ Client *list_pop(List *l);
 // basically called in loop in main file (struct has cursor element) and this func keeps "yielding"
 Client *list_iterator(List *l);
 
-// TODO 
+// TODO
 // pops the cursor
-Client *delete_cursor(List *l);
+void delete_cursor(List *l);
 
 void print_list(List *l);
 
 #endif
-

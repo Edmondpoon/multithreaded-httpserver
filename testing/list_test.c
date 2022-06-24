@@ -234,7 +234,6 @@ void deletion(void) {
         Client *out = list_iterator(l);
         if (val == 3 || val == 5) {
             delete_cursor(l);
-            val += 1;
         }
     }
     printf("-------\n");
@@ -264,12 +263,30 @@ void deletion(void) {
         ind += 1;
     }
 
+    free_list(&l);
+
+    List *k = create_list();
+    a = create_client(open("makefile", O_RDONLY));
+    list_push(k, a);
+    list_iterator(k);
+    delete_cursor(k);
+    if (list_iterator(k) == NULL) {
+
+        printf("Test %d\t" ANSI_COLOR_GREEN "PASSED" ANSI_COLOR_RESET "\n", tests + 1); 
+        passed += 1;
+    } else {
+        printf("Test %d\t" ANSI_COLOR_RED "FAILED!" ANSI_COLOR_RESET "\n", tests + 1); 
+    }
+    tests += 1;
+
+    print_list(k);
+
+    free_list(&k);
     if (passed < tests) {
         printf("" ANSI_COLOR_YELLOW "WARNING! Passed %d / %d tests" ANSI_COLOR_RESET "\n", passed, tests); 
     } else {
         printf(ANSI_COLOR_GREEN "Passed all deletion tests" ANSI_COLOR_RESET "\n"); 
     }
-    free_list(&l);
     return;
 
 }

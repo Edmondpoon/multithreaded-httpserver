@@ -1,7 +1,6 @@
 #include "ll.h"
 #include <stdlib.h>
 
-
 #include <stdio.h>
 
 typedef struct Node Node;
@@ -122,30 +121,40 @@ Client *list_iterator(List *l) {
 }
 
 // pops the cursor
-Client *delete_cursor(List *l) {
-    if (list_empty(l) || !l->cursor) {
-        return NULL;
-    } else {
+void delete_cursor(List *l) {
+    if (!list_empty(l) && l->cursor) {
         Node *temp = l->cursor;
         l->cursor->prev->next = l->cursor->next;
         l->cursor->next->prev = l->cursor->prev;
-        l->cursor = l->cursor->next;
-        Client *c = free_node(&temp);
+        if (!l->cursor->next->client) {
+            l->cursor = NULL;
+        } else {
+            l->cursor = l->cursor->prev;
+        }
+        if (l->head == temp && list_size(l) - 1 > 0) {
+            l->head = temp->next;
+        }
+        if (l->tail == temp && list_size(l) - 1 > 0) {
+            l->tail = temp->prev;
+        }
+        free_node(&temp);
         l->length -= 1;
-        return c;
     }
+    return;
 }
 
 void print_list(List *l) {
+    if (list_empty(l)) {
+        return;
+    }
     Node *current = l->head;
-    while (current->client) {
+    while (current && current->client) {
         printf("%d", current->client->fd);
         current = current->next;
-        if (current->client) {
+        if (current && current->client) {
             printf(" -> ");
         }
     }
     printf("\n");
     return;
 }
-

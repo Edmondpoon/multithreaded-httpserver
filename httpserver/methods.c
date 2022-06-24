@@ -12,7 +12,8 @@
 #define BLOCK 4096
 pthread_mutex_t poll_lock = PTHREAD_MUTEX_INITIALIZER;
 
-int Get(Client *connection, int connfd) {
+int Get(Client *connection) {
+    int connfd = connection->fd;
     struct stat sb;
     int exists = stat(connection->uri + 1, &sb), directory = S_ISDIR(sb.st_mode);
     if (exists > -1 && !directory) {
@@ -20,7 +21,6 @@ int Get(Client *connection, int connfd) {
         if (fd < 0) {
             return NOT_FOUND;
         }
-        // non blocking TODO
         flock(fd, LOCK_SH);
         // Get the number of bytes in the file
         stat(connection->uri + 1, &sb);
@@ -35,7 +35,6 @@ int Get(Client *connection, int connfd) {
         while (total_read > 0) {
             red = read(fd, buffer, BLOCK - 1);
             total_read -= red;
-            // TODO
             int index = 0;
             while (red > 0) {
                 int written = write(connfd, buffer + index, red);
@@ -51,7 +50,8 @@ int Get(Client *connection, int connfd) {
     return ERROR;
 }
 
-int Put(Client *connection, int nonBodyLength, Queue *polled) {
+int Put(Client *connection, List *polled) {
+    int connfd = connection->fd;
     bool create = false;
     // determines whether the file was created or already existed
     int fd = open(connection->uri + 1, O_WRONLY);
@@ -66,13 +66,12 @@ int Put(Client *connection, int nonBodyLength, Queue *polled) {
         tempfd = open(connection->tempfile, O_RDWR | O_APPEND);
     }
     if (tempfd < 0) {
-        printf("broke\n");
-        // TODO
         return ERROR;
     }
 
     char buffer[BLOCK + 1] = { 0 };
     int red = connection->headers_index;
+    int nonBodyLength = connection->non_body_index;
     if (red - nonBodyLength > -1 && red - nonBodyLength <= connection->content_length) {
         write(tempfd, connection->headers + nonBodyLength, red - nonBodyLength);
         connection->content_length -= red - nonBodyLength;
@@ -84,7 +83,7 @@ int Put(Client *connection, int nonBodyLength, Queue *polled) {
         return POLLED;
     }
     while (connection->content_length > 0) {
-        red = read(connection->fd, buffer,
+        red = read(connfd, buffer,
             (connection->content_length > BLOCK ? BLOCK : connection->content_length));
         write(tempfd, buffer, red);
         connection->content_length -= red;
@@ -93,7 +92,6 @@ int Put(Client *connection, int nonBodyLength, Queue *polled) {
         }
     }
 
-    // TODO non blocking
     flock(fd, LOCK_EX);
     rename(connection->tempfile, connection->uri + 1);
     flock(fd, LOCK_UN);
@@ -102,12 +100,13 @@ int Put(Client *connection, int nonBodyLength, Queue *polled) {
 
     int status = ERROR;
     if (create) {
-        createdResponse(connection->fd);
+        createdResponse(connfd);
         status = CREATED;
     } else {
-        okResponse(connection->fd);
+        okResponse(connfd);
         status = OK;
     }
+
     return status;
 }
 

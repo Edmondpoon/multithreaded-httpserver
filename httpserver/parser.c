@@ -5,9 +5,6 @@
 #include <ctype.h>
 #include <sys/stat.h>
 
-//TODO
-#include <stdio.h>
-
 // Parses a buffer for phrases that match a given regex
 int regex_headers(regex_t *regex, char *words[1024], char buffer[2048], int size) {
     regmatch_t match;
@@ -33,11 +30,6 @@ int regex_headers(regex_t *regex, char *words[1024], char buffer[2048], int size
 // Parses a header field for the key and value
 // returns whether the header is valid and the value if desired
 int64_t parse_headerField(char *header, int *value) {
-
-    if (strstr(header, "HTTP/1.1")) {
-        // TODO technically is wrong since header can have HTTP in it
-        return -1;
-    }
     int index = 0, length = 0;
 
     // Calculates the length of the header excluding \r\n
@@ -77,7 +69,6 @@ int64_t parse_headerField(char *header, int *value) {
         }
         char *number = (char *) calloc(length - index, sizeof(char));
         int ind = 0;
-        // TODO convert str to num in helper
         while (index < length) {
             if (!isdigit(header[index])) {
                 break;
@@ -120,17 +111,18 @@ int64_t parse_headerField(char *header, int *value) {
 // returns whether the request line was valid or not
 int parse_requestLine(char **uri, char *request) {
     int length = 0;
-    char type[9] = { 0 };
-    // Calculates the length of the header excluding \r\n
+    char type[REQUEST_MAX] = { 0 };
+    int limit = REQUEST_MAX; // Ensures the request line is at most 2048 characters
+    // Calculates the length of the request line excluding \r\n
     while (request[length + 1] != '\n' || request[length] != '\r') {
         length += 1;
     }
     // Method
     // Only accepting the methods APPEND, GET, and PUT
-    // TODO allow for any sized method
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < REQUEST_MAX; ++i) {
         length -= 1;
-        if (request[0] == ' ') {
+        limit -= 1;
+        if (limit < 0 || request[0] == ' ') {
             // Found space delimiter between the method and URI
             break;
         }
@@ -140,10 +132,11 @@ int parse_requestLine(char **uri, char *request) {
     request += 1;
 
     // URI
-    char path[2048] = { 0 };
-    for (int i = 0; i < 2048; ++i) {
+    char path[REQUEST_MAX] = { 0 };
+    for (int i = 0; i < REQUEST_MAX; ++i) {
+        limit -= 1;
         length -= 1;
-        if (length < 0 || request[0] == ' ') {
+        if (limit < 0 || length < 0 || request[0] == ' ') {
             break;
         }
         path[i] = request[0];
@@ -156,16 +149,16 @@ int parse_requestLine(char **uri, char *request) {
     // Version
     char version[10] = { 0 };
     for (int i = 0; i < 9; ++i) {
-        if (length <= 0 || request[0] == ' ') {
+        if (limit < 0 || length <= 0 || request[0] == ' ') {
             break;
         }
         version[i] = toupper(request[0]);
         length -= 1;
         request += 1;
+        limit -= 1;
     }
 
-    if (strcmp(version, "HTTP/1.1")) {
-        printf("%s\n", version);
+    if (limit < 0 || strcmp(version, "HTTP/1.1")) {
         return INVALID;
     }
 
@@ -185,7 +178,7 @@ int parse_requestLine(char **uri, char *request) {
 // returns whether the path was valid or not
 bool parse_uri(char *path, int request) {
     struct stat sb;
-    char path_name[2048] = { 0 };
+    char path_name[REQUEST_MAX] = { 0 };
     // Ensures the path is valid
     for (unsigned long chr = 1; chr < strlen(path); ++chr) {
         if (path[chr] == '/') {

@@ -13,17 +13,17 @@ void cleanup_init(Queue *q);
 
 bool get_cleanup(Queue *q);
 
-bool empty(Queue *q);
+bool queue_empty(Queue *q);
 
-bool full(Queue *q);
+bool queue_full(Queue *q);
 
-int length(Queue *q);
+int queue_length(Queue *q);
 
 //void push(Queue *q, int connfd, int id, int length, int method, char *uri);
-void push(Queue *q, Client *connfd);
+void queue_push(Queue *q, Client *connfd);
 //void push(Queue *q, int connfd);
 
-Client *pop(Queue *q);
+Client *queue_pop(Queue *q);
 //int pop(Queue *q);
 
 #endif

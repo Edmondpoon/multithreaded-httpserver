@@ -1,4 +1,5 @@
 #include "client.h"
+#include "ll.h"
 #include "methods.h"
 #include "parser.h"
 #include "queue.h"
@@ -22,7 +23,6 @@
 #define OPTIONS              "t:l:"
 #define BUF_SIZE             4096
 #define MAX_EVENTS           4096
-#define REQUEST_MAX          2048
 #define DEFAULT_THREAD_COUNT 4
 static FILE *logfile;
 #define LOG(...) fprintf(logfile, __VA_ARGS__);
@@ -38,7 +38,7 @@ enum Cond { WAITING, FILLED, READY };
 // created is the number of threads that haven't been destroyed (used to ensure all threads close when sigterm)
 int working = 0, created = 0;
 Queue *queue = NULL;
-Queue *polled = NULL;
+List *polled = NULL;
 pthread_t *workers = NULL;
 
 // Logs a request
@@ -101,9 +101,8 @@ static int create_listen_socket(uint16_t port) {
 }
 
 static void handle_connection(Client *connection, regex_t reg) {
-    // TODO the implementation of just pushing back to queue is broken rn cause queue may be full
     char *parsed[1024];
-    int nonBodyLength = 0, red = 0;
+    int red = 0;
     int connfd = connection->fd, matches = 0;
     if (!connection->headers_processed) {
         red = read(connfd, connection->headers + connection->headers_index,
@@ -139,7 +138,7 @@ static void handle_connection(Client *connection, regex_t reg) {
             return;
         }
         // Helps keep track of whether the buffer includes some body text
-        nonBodyLength += strlen(parsed[0]);
+        connection->non_body_index += strlen(parsed[0]);
         set_method(connection, parse_requestLine(&(connection->uri), parsed[0]));
         // parse headers
         // Start at after the first pair of \r\n of the request line
@@ -147,7 +146,7 @@ static void handle_connection(Client *connection, regex_t reg) {
         for (int match = 1; match < matches; ++match) {
             int value = 0;
             int l = strlen(parsed[match]);
-            nonBodyLength += l;
+            connection->non_body_index += l;
             if (l == 2 && parsed[match][0] == '\r' && parsed[match][1] == '\n') {
                 // Found the empty header
                 connection->headers_processed = true;
@@ -189,21 +188,23 @@ static void handle_connection(Client *connection, regex_t reg) {
         log_request(connection->method, connection->uri, 404, id);
         notFoundResponse(connfd);
     } else if (connection->method == GET) {
-        int success = Get(connection, connfd);
+        int success = Get(connection);
         if (success == OK) {
             log_request(connection->method, connection->uri, 200, id);
         }
     } else if (connection->method == PUT) {
-        int success = Put(connection, nonBodyLength, polled);
+        int success = Put(connection, polled);
         switch (success) {
         case CREATED: log_request(connection->method, connection->uri, 201, id); break;
         case OK: log_request(connection->method, connection->uri, 200, id); break;
-        case POLL:
+        case POLLED:
             // Don't close the connection for polled requests
             return;
         case ERROR: return;
         default: return;
         }
+    } else {
+        printf("TODO\n");
     }
     close_client(&connection);
     return;
@@ -220,22 +221,25 @@ void *thread_handler() {
         exit(EXIT_FAILURE);
     }
     for (;;) {
-        while (empty(queue) && !get_cleanup(queue)) {
+        while (queue_empty(queue) && !get_cleanup(queue)) {
             // Sleeps until the main thread signals this thread that an incoming request needs parsing
             gettimeofday(&now, NULL);
             ts.tv_sec = now.tv_sec + 5;
             if (pthread_cond_timedwait(&(conds[WAITING]), &(locks[WAIT]), &ts) == ETIMEDOUT
-                && !empty(polled)) {
+                && !list_empty(polled)) {
                 pthread_mutex_lock(&poll_lock);
-                //if (!empty(polled)) {
-                for (int i = 0; i < length(polled); ++i) {
-                    // TODO assumes doesnt get full
-                    Client *temp = pop(polled);
-                    if (poll(&temp->poller, 1, 1500) > 0) {
-                        push(queue, temp);
-                    } else {
-                        push(polled, temp);
+                print_list(polled);
+                int length = list_size(polled);
+                for (int i = 0; i < length; ++i) {
+                    Client *temp = list_iterator(polled);
+                    if (!temp) {
+                        break;
                     }
+                    if (poll(&temp->poller, 1, 1500) > 0) {
+                        delete_cursor(polled);
+                        queue_push(queue, temp);
+                        print_list(polled);
+                    } 
                 }
                 pthread_mutex_unlock(&poll_lock);
             }
@@ -243,7 +247,7 @@ void *thread_handler() {
         if (get_cleanup(queue)) {
             break;
         }
-        Client *client = pop(queue);
+        Client *client = queue_pop(queue);
         pthread_cond_signal(&(conds[FILLED]));
         working += 1;
         assert(pthread_mutex_unlock(&(locks[WAIT])) == 0);
@@ -284,7 +288,7 @@ static void sigterm_handler(int sig) {
             free_queue(&queue);
         }
         if (polled) {
-            free_queue(&polled);
+            free_list(&polled);
         }
         for (int l = 0; l < 4; ++l) {
             pthread_mutex_destroy(&(locks[l]));
@@ -336,7 +340,7 @@ int main(int argc, char *argv[]) {
     queue = create_queue(BUF_SIZE);
     assert(queue);
 
-    polled = create_queue(BUF_SIZE); // Stores polled requests
+    polled = create_list(); // Stores polled requests
     assert(polled);
 
     workers = (pthread_t *) calloc(threads, sizeof(pthread_t));
@@ -359,18 +363,16 @@ int main(int argc, char *argv[]) {
             continue;
         }
         assert(pthread_mutex_lock(&(locks[WAIT])) == 0);
-        while (full(queue)) {
+        while (queue_full(queue)) {
             // Full bounded queue so the current client has to be put on hold
             pthread_cond_wait(&(conds[FILLED]), &(locks[WAIT]));
         }
         Client *c = create_client(connfd);
-        if (poll_client(c, polled)) {
-            push(polled, c);
-        } else {
-            push(queue, c);
+        if (!poll_client(c, polled)) {
+            queue_push(queue, c);
         }
 
-        int l = length(queue);
+        int l = queue_length(queue);
         int max = (l > threads - working ? threads - working : l);
         for (int i = 0; i < max; ++i) {
             pthread_cond_signal(&(conds[WAITING]));

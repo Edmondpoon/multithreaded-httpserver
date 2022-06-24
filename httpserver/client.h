@@ -12,6 +12,7 @@ typedef struct Client {
     int content_length;
     int method;
     int headers_index;
+    int non_body_index;
     char *uri;
     char *headers;
     char tempfile[7];

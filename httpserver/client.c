@@ -19,6 +19,7 @@ Client *create_client(int fd) {
         c->headers = (char *) calloc(HEADER_SIZE + 1, sizeof(char));
         c->headers_processed = false;
         c->headers_index = 0;
+        c->non_body_index = 0;
         c->uri = NULL;
         c->poller.fd = fd;
         c->poller.events = POLLIN;
@@ -28,7 +29,6 @@ Client *create_client(int fd) {
 }
 
 void close_client(Client **c) {
-    printf("called\n");
     if (*c) {
         if ((*c)->uri) {
             free((*c)->uri);
@@ -38,6 +38,7 @@ void close_client(Client **c) {
         free(*c);
         *c = NULL;
     }
+    return;
 }
 
 void set_id(Client *c, int id) {

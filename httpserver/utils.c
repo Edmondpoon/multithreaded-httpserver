@@ -13,6 +13,7 @@
 char *concat_str(uint64_t num, char *str) {
     int numbers[1024] = { 0 }, total = 0;
     // Gets all the digits in the number
+    // Casting to double is needed to allow for single digit numbers to be included
     while ((double) num / 10 > 0) {
         numbers[total] = num % 10;
         total += 1;
@@ -37,10 +38,10 @@ char *concat_str(uint64_t num, char *str) {
     return concat;
 }
 
-bool poll_client(Client *client, Queue *polled) {
+bool poll_client(Client *client, List *polled) {
     if (poll(&client->poller, 1, TIMEOUT) == 0) {
         assert(pthread_mutex_lock(&poll_lock) == 0);
-        push(polled, client);
+        list_push(polled, client);
         assert(pthread_mutex_unlock(&poll_lock) == 0);
         return true;
     }
