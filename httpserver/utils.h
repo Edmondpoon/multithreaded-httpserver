@@ -8,4 +8,6 @@ char *concat_str(uint64_t num, char *str);
 
 bool poll_client(Client *client, List *polled);
 
+int write_bytes(int fd, char *buffer, int nbytes);
+
 #endif

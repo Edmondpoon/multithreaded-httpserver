@@ -47,3 +47,17 @@ bool poll_client(Client *client, List *polled) {
     }
     return false;
 }
+
+int write_bytes(int fd, char *buffer, int nbytes) {
+    int total = 0;
+    while (nbytes > 0) {
+        int written = write(fd, buffer + total, nbytes);
+        if (written < 1) {
+            break;
+        }
+        nbytes -= written;
+        total += written;
+    }
+    return total;
+}
+

@@ -14,7 +14,7 @@
 #define LENGTH          33
 #define ID              44
 
-enum Requests { PUT, APPEND, GET };
+enum Requests { PUT, HEAD, GET, OPTIONS, APPEND };
 
 int regex_headers(regex_t *regex, char *words[1024], char buffer[2048], int size);
 

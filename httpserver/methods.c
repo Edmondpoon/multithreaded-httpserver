@@ -1,5 +1,4 @@
 #include "methods.h"
-#include "response.h"
 #include "utils.h"
 #include <err.h>
 #include <sys/stat.h>
@@ -15,8 +14,9 @@ pthread_mutex_t poll_lock = PTHREAD_MUTEX_INITIALIZER;
 int Get(Client *connection) {
     int connfd = connection->fd;
     struct stat sb;
-    int exists = stat(connection->uri + 1, &sb), directory = S_ISDIR(sb.st_mode);
-    if (exists > -1 && !directory) {
+    stat(connection->uri + 1, &sb);
+    int directory = S_ISDIR(sb.st_mode);
+    if (!directory) {
         int fd = open(connection->uri + 1, O_RDONLY);
         if (fd < 0) {
             return NOT_FOUND;
@@ -46,8 +46,10 @@ int Get(Client *connection) {
         free(header);
         close(fd);
         return OK;
+    } else {
+        forbidden_response(connfd);
+        return FORBIDDEN;
     }
-    return ERROR;
 }
 
 int Put(Client *connection, List *polled) {
@@ -66,7 +68,101 @@ int Put(Client *connection, List *polled) {
         tempfd = open(connection->tempfile, O_RDWR | O_APPEND);
     }
     if (tempfd < 0) {
-        return ERROR;
+        return INTERNAL_ERROR;
+    }
+
+    char buffer[BLOCK + 1] = { 0 };
+    int red = connection->headers_index;
+    int nonBodyLength = connection->non_body_index;
+    if (red - nonBodyLength > -1 && red - nonBodyLength <= connection->content_length) {
+        write(tempfd, connection->headers + nonBodyLength, red - nonBodyLength);
+        connection->content_length -= red - nonBodyLength;
+    } else if (red - nonBodyLength > connection->content_length) {
+        write(tempfd, connection->headers + nonBodyLength, connection->content_length);
+        connection->content_length = 0;
+    }
+    if (connection->content_length > 0 && poll_client(connection, polled)) {
+        return POLLED;
+    }
+    while (connection->content_length > 0) {
+        red = read(connfd, buffer,
+            (connection->content_length > BLOCK ? BLOCK : connection->content_length));
+        write(tempfd, buffer, red);
+        connection->content_length -= red;
+        if (connection->content_length > 0 && poll_client(connection, polled)) {
+            return POLLED;
+        }
+    }
+
+    int status = ERROR;
+    flock(fd, LOCK_EX);
+    rename(connection->tempfile, connection->uri + 1);
+    if (create) {
+        created_response(connfd);
+        status = CREATED;
+    } else {
+        ok_response(connfd);
+        status = OK;
+    }
+    flock(fd, LOCK_UN);
+    close(tempfd);
+    close(fd);
+
+    return status;
+}
+
+int Head(Client *connection) {
+    int connfd = connection->fd;
+    struct stat sb;
+    int directory = S_ISDIR(sb.st_mode);
+    if (!directory) {
+        int fd = open(connection->uri + 1, O_RDONLY);
+        if (fd < 0) {
+            return NOT_FOUND;
+        }
+        flock(fd, LOCK_SH);
+        // Get the number of bytes in the file
+        stat(connection->uri + 1, &sb);
+        uint64_t total_read = sb.st_size;
+        char *header = concat_str(total_read, "HTTP/1.1 200 OK\r\nContent-Length: ");
+        int header_size = strlen(header);
+        write(connfd, header, header_size);
+        flock(fd, LOCK_UN);
+        free(header);
+        close(fd);
+        return OK;
+    } else {
+        forbidden_response(connfd);
+        return FORBIDDEN;
+    }
+}
+
+int Options(Client *connection) {
+    char status[] = "HTTP/1.1 204 No Content\r\nAllow: GET,HEAD,PUT,OPTIONS\r\n\r\n";
+    write(connection->fd, status, strlen(status));
+    return OK;
+}
+
+int Append(Client *connection, List *polled) {
+    int connfd = connection->fd;
+    struct stat sb;
+    stat(connection->uri + 1, &sb);
+    int directory = S_ISDIR(sb.st_mode);
+    int fd = open(connection->uri + 1, O_APPEND | O_WRONLY);
+    if (!directory || fd < 0) {
+        // File doesn't exist
+        if (fd < 0) {
+            return NOT_FOUND;
+        }
+    }
+    int tempfd = -1;
+    if (!strcmp(connection->tempfile, "XXXXXX")) {
+        tempfd = mkstemp(connection->tempfile);
+    } else {
+        tempfd = open(connection->tempfile, O_RDWR | O_APPEND);
+    }
+    if (tempfd < 0) {
+        return INTERNAL_ERROR;
     }
 
     char buffer[BLOCK + 1] = { 0 };
@@ -93,25 +189,20 @@ int Put(Client *connection, List *polled) {
     }
 
     flock(fd, LOCK_EX);
-    rename(connection->tempfile, connection->uri + 1);
+    // Reset read head of temp file to start
+    lseek(tempfd, 0, SEEK_SET);
+    while ((red = read(tempfd, buffer, BLOCK - 1)) > 0) {
+        int ind = 0;
+        while (red > 0) {
+            int written = write(fd, buffer + ind, red);
+            ind += written;
+            red -= written;
+        }
+    }
+    ok_response(connfd);
     flock(fd, LOCK_UN);
     close(tempfd);
     close(fd);
 
-    int status = ERROR;
-    if (create) {
-        createdResponse(connfd);
-        status = CREATED;
-    } else {
-        okResponse(connfd);
-        status = OK;
-    }
-
-    return status;
+    return OK;
 }
-
-int Delete();
-
-int Head();
-
-int Post();

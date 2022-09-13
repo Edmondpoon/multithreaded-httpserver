@@ -2,19 +2,19 @@
 #define _METHODS_H_
 
 #include "ll.h"
+#include "response.h"
 #include <pthread.h>
 
 extern pthread_mutex_t poll_lock;
-enum Status_codes { ERROR, CREATED, OK, NOT_FOUND, POLLED };
 
 int Get(Client *c);
 
 int Put(Client *c, List *polled);
 
-int Delete();
+int Head(Client *c);
 
-int Head();
+int Options(Client *c);
 
-int Post();
+int Append(Client *c, List *polled);
 
 #endif

@@ -5,6 +5,8 @@
 #include <ctype.h>
 #include <sys/stat.h>
 
+#include <stdio.h>
+
 // Parses a buffer for phrases that match a given regex
 int regex_headers(regex_t *regex, char *words[1024], char buffer[2048], int size) {
     regmatch_t match;
@@ -31,7 +33,6 @@ int regex_headers(regex_t *regex, char *words[1024], char buffer[2048], int size
 // returns whether the header is valid and the value if desired
 int64_t parse_headerField(char *header, int *value) {
     int index = 0, length = 0;
-
     // Calculates the length of the header excluding \r\n
     while (header[length + 1] != '\n' || header[length] != '\r') {
         length += 1;
@@ -118,7 +119,7 @@ int parse_requestLine(char **uri, char *request) {
         length += 1;
     }
     // Method
-    // Only accepting the methods APPEND, GET, and PUT
+    // Only accepting the methods HEAD, GET, and PUT
     for (int i = 0; i < REQUEST_MAX; ++i) {
         length -= 1;
         limit -= 1;
@@ -166,10 +167,14 @@ int parse_requestLine(char **uri, char *request) {
     // Determine which method this request wants
     if (!strcmp(type, "PUT")) {
         method = PUT;
-    } else if (!strcmp(type, "APPEND")) {
-        method = APPEND;
+    } else if (!strcmp(type, "HEAD")) {
+        method = HEAD;
     } else if (!strcmp(type, "GET")) {
         method = GET;
+    } else if (!strcmp(type, "OPTIONS")) {
+        method = OPTIONS;
+    } else if (!strcmp(type, "APPEND")) {
+        method = APPEND;
     }
     return method;
 }

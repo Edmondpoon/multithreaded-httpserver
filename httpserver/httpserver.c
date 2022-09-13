@@ -20,12 +20,11 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 
-#define OPTIONS              "t:l:"
+#define FLAGS              "t:l:"
 #define BUF_SIZE             4096
 #define MAX_EVENTS           4096
 #define DEFAULT_THREAD_COUNT 4
 static FILE *logfile;
-#define LOG(...) fprintf(logfile, __VA_ARGS__);
 
 pthread_mutex_t locks[4] = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
     PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER };
@@ -45,17 +44,19 @@ pthread_t *workers = NULL;
 void log_request(int request, char *path, int status, int id) {
     char req[10] = { 0 };
     switch (request) {
-    case 0: memcpy(req, "PUT", 3); break;
-    case 1: memcpy(req, "APPEND", 6); break;
-    case 2: memcpy(req, "GET", 3); break;
+    case PUT: memcpy(req, "PUT", 3); break;
+    case HEAD: memcpy(req, "HEAD", 4); break;
+    case GET: memcpy(req, "GET", 3); break;
+    case OPTIONS: memcpy(req, "OPTIONS", 7); break;
     default:;
     }
     pthread_mutex_lock(&(locks[LOG]));
-    LOG("%s,%s,%d,%d\n", req, path, status, id);
+    fprintf(logfile, "%s,%s,%d,%d\n", req, path, status, id);
     fflush(logfile);
     pthread_mutex_unlock(&(locks[LOG]));
     return;
 }
+
 
 // Free regex
 void free_regex(char *words[1024], int size) {
@@ -153,9 +154,7 @@ static void handle_connection(Client *connection, regex_t reg) {
                 break;
             }
             int64_t temp = parse_headerField(parsed[match], &value);
-            if (temp == INVALID) {
-                break;
-            } else if (connection->content_length == UNDEFINED && temp == LENGTH) {
+            if (connection->content_length == UNDEFINED && temp == LENGTH) {
                 set_length(connection, value);
             } else if (temp == ID) {
                 id = value;
@@ -170,42 +169,55 @@ static void handle_connection(Client *connection, regex_t reg) {
         // invalid path judged by length
         log_request(connection->method, connection->uri, 404, connection->id);
         close_client(&connection);
-        notFoundResponse(connfd);
+        notFound_response(connfd);
         return;
     } else if (!strcmp(connection->tempfile, "XXXXXX")
                && !parse_uri(connection->uri, connection->method)) {
-        // parse URI to deal with directories
+        // parse URI to deal with potentially new directories
         log_request(connection->method, connection->uri, 500, connection->id);
         close_client(&connection);
-        internalErrorResponse(connfd);
+        internalError_response(connfd);
         return;
     }
 
     struct stat sb;
     int exists = stat(connection->uri + 1, &sb);
+    int status = INTERNAL_ERROR;
     if (exists < 0 && connection->method != PUT) {
         // Put requests are the only ones that don't require the file to exist beforehand
-        log_request(connection->method, connection->uri, 404, id);
-        notFoundResponse(connfd);
-    } else if (connection->method == GET) {
-        int success = Get(connection);
-        if (success == OK) {
-            log_request(connection->method, connection->uri, 200, id);
-        }
-    } else if (connection->method == PUT) {
-        int success = Put(connection, polled);
-        switch (success) {
-        case CREATED: log_request(connection->method, connection->uri, 201, id); break;
-        case OK: log_request(connection->method, connection->uri, 200, id); break;
-        case POLLED:
-            // Don't close the connection for polled requests
-            return;
-        case ERROR: return;
-        default: return;
-        }
+        status = NOT_FOUND;
+        notFound_response(connfd);
     } else {
-        printf("TODO\n");
+        switch (connection->method) {
+            case GET:
+                status = Get(connection);
+                break;
+            case PUT:
+                status = Put(connection, polled);
+                if (status == POLLED) {
+                    // Don't close the connection for polled requests
+                    return;
+                }
+                break;
+            case APPEND:
+                status = Append(connection, polled);
+                if (status == POLLED) {
+                    // Don't close the connection for polled requests
+                    return;
+                }
+                break;
+            case HEAD:
+                status = Head(connection);
+                break;
+            case OPTIONS:
+                status = Options(connection);
+                break;
+            default:
+                printf("TODO\n");
+                break;
+        }
     }
+    log_request(connection->method, connection->uri, status, id);
     close_client(&connection);
     return;
 }
@@ -239,7 +251,7 @@ void *thread_handler() {
                         delete_cursor(polled);
                         queue_push(queue, temp);
                         print_list(polled);
-                    } 
+                    }
                 }
                 pthread_mutex_unlock(&poll_lock);
             }
@@ -308,7 +320,7 @@ int main(int argc, char *argv[]) {
     int opt = 0;
     int threads = DEFAULT_THREAD_COUNT;
     logfile = stderr;
-    while ((opt = getopt(argc, argv, OPTIONS)) != -1) {
+    while ((opt = getopt(argc, argv, FLAGS)) != -1) {
         switch (opt) {
         case 't':
             threads = strtol(optarg, NULL, 10);

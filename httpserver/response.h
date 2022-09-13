@@ -3,12 +3,29 @@
 
 #include <unistd.h>
 
-void okResponse(int fd);
+#define OK 200
+#define CREATED 201
+#define NO_CONTENT 204
+#define FORBIDDEN 403
+#define NOT_FOUND 404
+#define INTERNAL_ERROR 500
 
-void createdResponse(int fd);
+// TODO define for the actual values rather than indices if not used as indices
+enum Misc_codes { ERROR, POLLED };
 
-void notFoundResponse(int fd);
+void ok_response(int fd);
 
-void internalErrorResponse(int fd);
+void created_response(int fd);
+
+void bad_response(int fd);
+
+void notFound_response(int fd);
+
+void internalError_response(int fd);
+
+void forbidden_response(int fd);
+
+void notImplemented_response(int fd);
 
 #endif
+
