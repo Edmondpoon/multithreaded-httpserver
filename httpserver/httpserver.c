@@ -349,6 +349,7 @@ int main(int argc, char *argv[]) {
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, sigterm_handler);
 
+    // The queue will be used to store connections that have data ready to be read
     queue = create_queue(BUF_SIZE);
     assert(queue);
 
